@@ -1,0 +1,10 @@
+[package]
+name = "meowww"
+version = "0.1.0"
+authors = ["François Gindraud <francois.gindraud@univ-lyon1.fr>"]
+description = "Simple stateless chat server with websockets"
+
+[dependencies]
+rouille = "2"
+horrorshow = "0.6"
+clap = "2"
