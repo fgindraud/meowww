@@ -84,8 +84,11 @@ impl Room {
         &self.name
     }
     fn add_message(&mut self, message: Message) {
-        notify_clients(&mut self.clients, &message);
-        self.history.push_back(message);
+        // Do not propagate degenerate messages
+        if !message.nickname.trim().is_empty() && !message.content.trim().is_empty() {
+            notify_clients(&mut self.clients, &message);
+            self.history.push_back(message);
+        }
     }
     fn history(&self) -> &VecDeque<Message> {
         &self.history
@@ -132,6 +135,7 @@ fn room_page(room: &str, history: Option<&VecDeque<Message>>) -> Response {
         html {
             head {
                 link(rel="stylesheet", type="text/css", href="/static/style.css");
+                meta(name="viewport", content="width=device-width, initial-scale=1.0");
                 title : format!("Meowww - {}", room);
             }
             body {

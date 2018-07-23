@@ -4,10 +4,17 @@ form {
 	flex-direction: row;
 }
 input {
-	margin: 2px;
+	margin: 1px;
 }
 input[name="content"] {
 	flex: 1;
+}
+input[name="nickname"] {
+	width: 12ch;
+}
+input[type="submit"] {
+	/* Gain space by hiding the send button. Enter in content field works. */
+	display: none;
 }
 
 /* Pretty chat lines, aligned as a table. */
@@ -17,28 +24,33 @@ table tr:nth-child(even) {
 table tr:nth-child(odd) {
 	background-color: #fff;
 }
-table, tr, td {
-	border-collapse: collapse;
+table tr td:first-child {
+	/* IRC like nickname field. Column size to fit exactly. */
+	width: auto;
+	white-space: nowrap;
+	text-align: right;
+	border-right: solid #aaa;
+}
+table tr td:last-child {
+	width: 100%;
 }
 table {
+	border-collapse: collapse;
 	width: 100%;
-	padding: 0;
-}
-
-/* Same fixed width for nickname field. */
-input[name="nickname"], table tr td:first-child {
-	width: 15ch;
 }
 
 /* Footer is a fixed floating block at the bottom.
  * Add a margin so that if scrolled to bottom, main does not overlap.
- * Margin is arbitrary sadly...
+ * Margin is arbitrary, sadly...
  */
 body {
 	overflow-x: hidden;
+	padding: 0;
+	margin: 0;
 }
 main {
 	margin-bottom: 2em;
+	font-family: monospace;
 }
 footer {
 	position: fixed;
