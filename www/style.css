@@ -1,0 +1,21 @@
+footer {
+	position: fixed;
+	left: 0;
+	bottom: 0;
+	width: 100%;
+}
+
+form {
+	display: flex;
+	flex-direction: row;
+	padding: 0.5em;
+}
+input {
+	margin: 2px;
+}
+input[name="name"] {
+	width: 20ch;
+}
+input[name="message"] {
+	flex: 1;
+}

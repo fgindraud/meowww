@@ -4,6 +4,8 @@ extern crate rouille;
 extern crate horrorshow;
 #[macro_use]
 extern crate clap;
+#[macro_use]
+extern crate rust_embed;
 
 use horrorshow::Template;
 use rouille::Response;
@@ -25,9 +27,35 @@ fn start_server(addr: &str) {
     rouille::start_server(addr, move |request| {
         router!(request,
             (GET) ["/"] => { home_page() },
+            (GET) ["/static/{asset}", asset: String] => { send_asset(&asset) },
+            (GET) ["/{room}", room: String] => { room_page(&room) },
             _ => { Response::empty_404() }
         )
     })
+}
+
+fn room_page(name: &str) -> Response {
+    let template = html! {
+        : horrorshow::helper::doctype::HTML;
+        html {
+            head {
+                link(rel="stylesheet", type="text/css", href="/static/style.css");
+                title : format!("Meowww - {}", name);
+            }
+            body {
+                main {
+                }
+                footer {
+                    form {
+                        input(type="text", name="name", placeholder="Name");
+                        input(type="text", name="message", placeholder="Message", autofocus);
+                        input(type="submit", value="Send");
+                    }
+                }
+            }
+        }
+    };
+    Response::html(template.into_string().unwrap())
 }
 
 fn home_page() -> Response {
@@ -43,4 +71,24 @@ fn home_page() -> Response {
         }
     };
     Response::html(template.into_string().unwrap())
+}
+
+/* External files.
+ * Static files are much easier to edit as standalone.
+ * Use rust_embed to embed them in the binary (on release mode only).
+ */
+#[derive(RustEmbed)]
+#[folder = "www/"]
+struct Asset;
+
+fn send_asset(path: &str) -> Response {
+    if let Some(asset) = Asset::get(path) {
+        let content_type = match path {
+            path if path.ends_with(".css") => "text/css",
+            _ => "application/octet-stream",
+        };
+        Response::from_data(content_type, asset) // TODO Add .with_public_cache(3600)
+    } else {
+        Response::empty_404()
+    }
 }
