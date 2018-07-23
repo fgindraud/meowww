@@ -8,10 +8,13 @@ extern crate clap;
 extern crate rust_embed;
 
 use horrorshow::Template;
-use rouille::{Request, Response};
+use rouille::{websocket::Websocket, Request, Response};
 use std::collections::{HashMap, VecDeque};
-use std::sync::RwLock;
+use std::sync::{mpsc, Mutex};
 
+/******************************************************************************
+ * Start the server.
+ */
 fn main() {
     let matches = app_from_crate!()
         .arg(
@@ -26,28 +29,33 @@ fn main() {
 
 fn start_server(addr: &str) {
     eprintln!("Meowww starting on {}", addr);
-    let rooms = RwLock::new(HashMap::<String, Room>::new());
+    // use Mutex instead of Rwlock, because Room is not Sync (due to Client / Websocket).
+    let rooms = Mutex::new(HashMap::<String, Room>::new());
     rouille::start_server(addr, move |request| {
         router!(request,
             (GET) ["/"] => { home_page() },
             (GET) ["/static/{asset}", asset: String] => { send_asset(&asset) },
             (GET) ["/{room}", room: String] => {
-                room_page(&room, rooms.read().unwrap().get(&room).map(|r : &Room| r.history()))
+                let lock = rooms.lock().unwrap();
+                room_page(&room, lock.get(&room).map(|r : &Room| r.history()))
             },
             (POST) ["/{room}", room: String] => {
-                post_message(
-                    request,
-                    rooms.write().unwrap().entry (room.clone()).or_insert_with(|| Room::new(room))
-                    )
+                let mut lock = rooms.lock().unwrap();
+                post_message(request, lock.entry(room.clone()).or_insert_with(|| Room::new(room)))
             },
             (GET) ["/{room}/notify", room: String] => {
-                create_notify_websocket(request, &room)
+                let mut lock = rooms.lock().unwrap();
+                create_notify_websocket(request, lock.entry(room.clone()).or_insert_with(|| Room::new(room)))
             },
             _ => { Response::empty_404() }
         )
     })
 }
 
+/******************************************************************************
+ * Start the server.
+ */
+#[derive(Clone)]
 struct Message {
     nickname: String,
     content: String,
@@ -57,6 +65,7 @@ struct Message {
 struct Room {
     name: String,
     history: VecDeque<Message>,
+    clients: Vec<Client>,
 }
 
 impl Room {
@@ -64,19 +73,51 @@ impl Room {
         Room {
             name: name.into(),
             history: VecDeque::new(),
+            clients: Vec::new(),
         }
     }
     fn name(&self) -> &String {
         &self.name
     }
     fn add_message(&mut self, message: Message) {
-        self.history.push_back(message)
+        self.history.push_back(message);
+        notify_clients(&mut self.clients)
     }
     fn history(&self) -> &VecDeque<Message> {
         &self.history
     }
+    fn add_client(&mut self, socket: mpsc::Receiver<Websocket>) {
+        self.clients.push(Client::Pending(socket))
+    }
 }
 
+/* Notification:
+ * Send the message to each connected client.
+ * Drop any client with an error.
+ * If client was not connected yet (Pending), finish connection.
+ * FIXME send actual message
+ */
+enum Client {
+    Pending(mpsc::Receiver<Websocket>),
+    Connected(Websocket),
+}
+fn notify_clients(clients: &mut Vec<Client>) {
+    let mut notified_clients = Vec::new();
+    for client in clients.drain(..) {
+        let mut socket = match client {
+            Client::Pending(receiver) => receiver.recv().unwrap(),
+            Client::Connected(socket) => socket,
+        };
+        if let Ok(_) = socket.send_text("Blah") {
+            notified_clients.push(Client::Connected(socket))
+        }
+    }
+    *clients = notified_clients;
+}
+
+/******************************************************************************
+ * Webpage templates.
+ */
 fn room_page(room: &str, history: Option<&VecDeque<Message>>) -> Response {
     let template = html! {
         : horrorshow::helper::doctype::HTML;
@@ -123,14 +164,10 @@ fn post_message(request: &Request, room: &mut Room) -> Response {
     Response::redirect_303(format!("/{}", room.name()))
 }
 
-fn create_notify_websocket(request: &Request, room: &str) -> Response {
+fn create_notify_websocket(request: &Request, room: &mut Room) -> Response {
     use rouille::websocket;
-    let (response, websocket) = try_or_400!(websocket::start(request, Some("meowww")));
-
-    std::thread::spawn(move || {
-        let mut ws = websocket.recv().unwrap();
-    });
-
+    let (response, websocket_receiver) = try_or_400!(websocket::start(request, Some("meowww")));
+    room.add_client(websocket_receiver);
     response
 }
 
