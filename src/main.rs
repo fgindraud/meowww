@@ -102,7 +102,6 @@ impl Room {
  * Send the message to each connected client.
  * Drop any client with an error.
  * If client was not connected yet (Pending), finish connection.
- * FIXME send actual message
  */
 enum Client {
     Pending(mpsc::Receiver<Websocket>),
@@ -173,7 +172,7 @@ fn post_message(request: &Request, room: &mut Room) -> Response {
         content: form_data.content,
     };
     room.add_message(message);
-    Response::redirect_303(format!("/{}", room.name()))
+    Response::text("Message sent, but please enable javascript")
 }
 
 fn create_notify_websocket(request: &Request, room: &mut Room) -> Response {
