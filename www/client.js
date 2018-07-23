@@ -10,32 +10,26 @@ function get_scrollbar () {
 
 var form = $('form');
 var submit_button = $('input[type="submit"]');
-var input_message = $('input[name="message"]');
-var input_name = $('input[name="name"]');
-var content = $('table');
-var content_container = $('main');
+var input_nickname = $('input[name="nickname"]');
+var input_content = $('input[name="content"]');
+var messages = $('table');
 
+// FIXME temporarily disabled
+//form.attr('onsubmit', 'return send_message()');
 
-form.attr('onsubmit', 'return send_message()');
-submit_button.attr('disabled', false);
-
-function write_message(nickname, message) {
-
-	content.append($('<tr></tr>').append ($('<td></td>').text(nickname), $('<td></td>').text(message)));
+function write_message(message) {
+	messages.append($('<tr></tr>').append ($('<td></td>').text(message.nickname), $('<td></td>').text(message.content)));
 	var scrollbar = get_scrollbar();
 	scrollbar.scrollTop = scrollbar.scrollHeight; // Force scroll to bottom
 }
 
-for (i=0; i<30; i++) {
-	write_message("John", "Blah " + i);
-}
-
 function send_message() {
-	var nickname = input_name.val();
-	var message = input_message.val();
-	input_message.val('');
+	var message = {
+		nickname: input_nickname.val(),
+		content: input_content.val()
+	};
+	input_content.val('');
 
-	write_message(nickname, message);
+	write_message(message);
 	return false; // Prevent form from being actually sent
 }
-

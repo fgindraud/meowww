@@ -6,7 +6,7 @@ form {
 input {
 	margin: 2px;
 }
-input[name="message"] {
+input[name="content"] {
 	flex: 1;
 }
 
@@ -26,7 +26,7 @@ table {
 }
 
 /* Same fixed width for nickname field. */
-input[name="name"], table tr td:first-child {
+input[name="nickname"], table tr td:first-child {
 	width: 15ch;
 }
 
