@@ -9,7 +9,7 @@ extern crate rust_embed;
 
 use horrorshow::Template;
 use rouille::{Request, Response};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::RwLock;
 
 fn main() {
@@ -26,16 +26,22 @@ fn main() {
 
 fn start_server(addr: &str) {
     eprintln!("Meowww starting on {}", addr);
-    let database = RwLock::new(Database::new());
+    let rooms = RwLock::new(HashMap::<String, Room>::new());
     rouille::start_server(addr, move |request| {
         router!(request,
             (GET) ["/"] => { home_page() },
             (GET) ["/static/{asset}", asset: String] => { send_asset(&asset) },
             (GET) ["/{room}", room: String] => {
-                room_page(&room, database.read().unwrap().get_history(&room))
+                room_page(&room, rooms.read().unwrap().get(&room).map(|r : &Room| r.history()))
             },
             (POST) ["/{room}", room: String] => {
-                post_message(request, &room, &mut database.write().unwrap())
+                post_message(
+                    request,
+                    rooms.write().unwrap().entry (room.clone()).or_insert_with(|| Room::new(room))
+                    )
+            },
+            (GET) ["/{room}/notify", room: String] => {
+                create_notify_websocket(request, &room)
             },
             _ => { Response::empty_404() }
         )
@@ -47,27 +53,31 @@ struct Message {
     content: String,
 }
 
-struct Database {
-    history: HashMap<String, Vec<Message>>,
+// TODO history limit
+struct Room {
+    name: String,
+    history: VecDeque<Message>,
 }
-impl Database {
-    fn new() -> Self {
-        Database {
-            history: HashMap::new(),
+
+impl Room {
+    fn new<S: Into<String>>(name: S) -> Self {
+        Room {
+            name: name.into(),
+            history: VecDeque::new(),
         }
     }
-    fn add_message(&mut self, room: &str, message: Message) {
-        self.history
-            .entry(room.to_owned())
-            .or_insert_with(|| Vec::new())
-            .push(message)
+    fn name(&self) -> &String {
+        &self.name
     }
-    fn get_history(&self, room: &str) -> Option<&[Message]> {
-        self.history.get(room).map(|v| v.as_slice())
+    fn add_message(&mut self, message: Message) {
+        self.history.push_back(message)
+    }
+    fn history(&self) -> &VecDeque<Message> {
+        &self.history
     }
 }
 
-fn room_page(room: &str, history: Option<&[Message]>) -> Response {
+fn room_page(room: &str, history: Option<&VecDeque<Message>>) -> Response {
     let template = html! {
         : horrorshow::helper::doctype::HTML;
         html {
@@ -79,7 +89,7 @@ fn room_page(room: &str, history: Option<&[Message]>) -> Response {
                 main {
                     table {
                         @ if let Some(messages) = history {
-                            @ for m in messages {
+                            @ for m in messages.iter() {
                                 tr {
                                     td : &m.nickname;
                                     td : &m.content;
@@ -103,14 +113,25 @@ fn room_page(room: &str, history: Option<&[Message]>) -> Response {
     Response::html(template.into_string().unwrap())
 }
 
-fn post_message(request: &Request, room: &str, database: &mut Database) -> Response {
+fn post_message(request: &Request, room: &mut Room) -> Response {
     let form_data = try_or_400!(post_input!(request, { nickname: String, content: String }));
     let message = Message {
         nickname: form_data.nickname,
         content: form_data.content,
     };
-    database.add_message(room, message);
-    Response::redirect_303(format!("/{}", room))
+    room.add_message(message);
+    Response::redirect_303(format!("/{}", room.name()))
+}
+
+fn create_notify_websocket(request: &Request, room: &str) -> Response {
+    use rouille::websocket;
+    let (response, websocket) = try_or_400!(websocket::start(request, Some("meowww")));
+
+    std::thread::spawn(move || {
+        let mut ws = websocket.recv().unwrap();
+    });
+
+    response
 }
 
 fn home_page() -> Response {
