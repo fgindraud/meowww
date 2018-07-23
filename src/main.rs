@@ -133,11 +133,13 @@ fn home_page(request: &Request) -> Response {
         : horrorshow::helper::doctype::HTML;
         html {
             head {
+                link(rel="icon", type="image/vnd.microsoft.icon", href="/static/meowww.ico");
                 meta(name="viewport", content="width=device-width, initial-scale=1.0");
-                title : "Meowww";
+                title : "Meowww !";
             }
             body {
-                p : format!("Go to http://{}/<chat_room_name> to access a chat room.", server);
+                p : format!("Go to http://{}/<room_name> to access a chat room.", server);
+                p : "Conversations are not stored on disk, so save the page if you want to keep them !";
             }
         }
     };
@@ -149,6 +151,7 @@ fn room_page(room: &str, history: Option<&VecDeque<Message>>) -> Response {
         : horrorshow::helper::doctype::HTML;
         html {
             head {
+                link(rel="icon", type="image/vnd.microsoft.icon", href="/static/meowww.ico");
                 link(rel="stylesheet", type="text/css", href="/static/style.css");
                 meta(name="viewport", content="width=device-width, initial-scale=1.0");
                 title : format!("Meowww - {}", room);
@@ -216,6 +219,7 @@ fn send_asset(path: &str) -> Response {
         let content_type = match path {
             path if path.ends_with(".css") => "text/css",
             path if path.ends_with(".js") => "application/javascript",
+            path if path.ends_with(".ico") => "image/vnd.microsoft.icon",
             _ => "application/octet-stream",
         };
         Response::from_data(content_type, asset).with_public_cache(3600)
