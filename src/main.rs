@@ -44,14 +44,18 @@ fn room_page(name: &str) -> Response {
             }
             body {
                 main {
-                }
-                footer {
-                    form {
-                        input(type="text", name="name", placeholder="Name");
-                        input(type="text", name="message", placeholder="Message", autofocus);
-                        input(type="submit", value="Send");
+                    table {
                     }
                 }
+                footer {
+                    form(autocomplete="off") {
+                        input(type="text", name="name", placeholder="Name");
+                        input(type="text", name="message", placeholder="Message", autofocus);
+                        input(type="submit", value="Send", disabled);
+                    }
+                }
+                script(src="/static/jquery.js") {}
+                script(src="/static/client.js") {}
             }
         }
     };
@@ -85,6 +89,7 @@ fn send_asset(path: &str) -> Response {
     if let Some(asset) = Asset::get(path) {
         let content_type = match path {
             path if path.ends_with(".css") => "text/css",
+            path if path.ends_with(".js") => "application/javascript",
             _ => "application/octet-stream",
         };
         Response::from_data(content_type, asset) // TODO Add .with_public_cache(3600)

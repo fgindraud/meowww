@@ -1,21 +1,48 @@
+/* Form which expands the message field as required for the width */
+form {
+	display: flex;
+	flex-direction: row;
+}
+input {
+	margin: 2px;
+}
+input[name="message"] {
+	flex: 1;
+}
+
+/* Pretty chat lines, aligned as a table. */
+table tr:nth-child(even) {
+	background-color: #eee;
+}
+table tr:nth-child(odd) {
+	background-color: #fff;
+}
+table, tr, td {
+	border-collapse: collapse;
+}
+table {
+	width: 100%;
+	padding: 0;
+}
+
+/* Same fixed width for nickname field. */
+input[name="name"], table tr td:first-child {
+	width: 15ch;
+}
+
+/* Footer is a fixed floating block at the bottom.
+ * Add a margin so that if scrolled to bottom, main does not overlap.
+ * Margin is arbitrary sadly...
+ */
+body {
+	overflow-x: hidden;
+}
+main {
+	margin-bottom: 2em;
+}
 footer {
 	position: fixed;
 	left: 0;
 	bottom: 0;
 	width: 100%;
-}
-
-form {
-	display: flex;
-	flex-direction: row;
-	padding: 0.5em;
-}
-input {
-	margin: 2px;
-}
-input[name="name"] {
-	width: 20ch;
-}
-input[name="message"] {
-	flex: 1;
 }
