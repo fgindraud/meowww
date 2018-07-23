@@ -6,6 +6,10 @@ extern crate horrorshow;
 extern crate clap;
 #[macro_use]
 extern crate rust_embed;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
 
 use horrorshow::Template;
 use rouille::{websocket::Websocket, Request, Response};
@@ -55,7 +59,7 @@ fn start_server(addr: &str) {
 /******************************************************************************
  * Start the server.
  */
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Message {
     nickname: String,
     content: String,
@@ -80,8 +84,8 @@ impl Room {
         &self.name
     }
     fn add_message(&mut self, message: Message) {
+        notify_clients(&mut self.clients, &message);
         self.history.push_back(message);
-        notify_clients(&mut self.clients)
     }
     fn history(&self) -> &VecDeque<Message> {
         &self.history
@@ -101,15 +105,19 @@ enum Client {
     Pending(mpsc::Receiver<Websocket>),
     Connected(Websocket),
 }
-fn notify_clients(clients: &mut Vec<Client>) {
+fn notify_clients(clients: &mut Vec<Client>, message: &Message) {
+    let json = serde_json::to_string(message).unwrap();
+
     let mut notified_clients = Vec::new();
     for client in clients.drain(..) {
         let mut socket = match client {
             Client::Pending(receiver) => receiver.recv().unwrap(),
             Client::Connected(socket) => socket,
         };
-        if let Ok(_) = socket.send_text("Blah") {
+        if let Ok(_) = socket.send_text(&json) {
             notified_clients.push(Client::Connected(socket))
+        } else {
+            eprintln!("Client send_text failed, dropping socket")
         }
     }
     *clients = notified_clients;
@@ -168,6 +176,7 @@ fn create_notify_websocket(request: &Request, room: &mut Room) -> Response {
     use rouille::websocket;
     let (response, websocket_receiver) = try_or_400!(websocket::start(request, Some("meowww")));
     room.add_client(websocket_receiver);
+    eprintln!("New websocket!");
     response
 }
 
