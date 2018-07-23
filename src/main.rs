@@ -37,7 +37,7 @@ fn start_server(addr: &str) {
     let rooms = Mutex::new(HashMap::<String, Room>::new());
     rouille::start_server(addr, move |request| {
         router!(request,
-            (GET) ["/"] => { home_page() },
+            (GET) ["/"] => { home_page(request) },
             (GET) ["/static/{asset}", asset: String] => { send_asset(&asset) },
             (GET) ["/{room}", room: String] => {
                 let lock = rooms.lock().unwrap();
@@ -45,11 +45,11 @@ fn start_server(addr: &str) {
             },
             (POST) ["/{room}", room: String] => {
                 let mut lock = rooms.lock().unwrap();
-                post_message(request, lock.entry(room.clone()).or_insert_with(|| Room::new(room)))
+                post_message(request, lock.entry(room).or_insert_with(|| Room::new()))
             },
             (GET) ["/{room}/notify", room: String] => {
                 let mut lock = rooms.lock().unwrap();
-                create_notify_websocket(request, lock.entry(room.clone()).or_insert_with(|| Room::new(room)))
+                create_notify_websocket(request, lock.entry(room).or_insert_with(|| Room::new()))
             },
             _ => { Response::empty_404() }
         )
@@ -65,23 +65,17 @@ struct Message {
     content: String,
 }
 
-// TODO history limit
 struct Room {
-    name: String,
     history: VecDeque<Message>,
     clients: Vec<Client>,
 }
 
 impl Room {
-    fn new<S: Into<String>>(name: S) -> Self {
+    fn new() -> Self {
         Room {
-            name: name.into(),
             history: VecDeque::new(),
             clients: Vec::new(),
         }
-    }
-    fn name(&self) -> &String {
-        &self.name
     }
     fn add_message(&mut self, message: Message) {
         // Do not propagate degenerate messages
@@ -98,15 +92,21 @@ impl Room {
     }
 }
 
-/* Notification:
- * Send the message to each connected client.
- * Drop any client with an error.
- * If client was not connected yet (Pending), finish connection.
+/* Connection to client for notification.
+ * Due to rouille websocket API (synchronous), we only use these sockets to push notifications.
+ * They are only destroyed when trying to send data, during notifications.
+ * TODO periodic cleanup ?
  */
 enum Client {
     Pending(mpsc::Receiver<Websocket>),
     Connected(Websocket),
 }
+
+/* Notification:
+ * Send the message to each connected client.
+ * Drop any client with an error.
+ * If client was not connected yet (Pending), finish connection.
+ */
 fn notify_clients(clients: &mut Vec<Client>, message: &Message) {
     let json = serde_json::to_string(message).unwrap();
 
@@ -117,9 +117,8 @@ fn notify_clients(clients: &mut Vec<Client>, message: &Message) {
             Client::Connected(socket) => socket,
         };
         if let Ok(_) = socket.send_text(&json) {
+            // Drop if failed to send, keep on success
             notified_clients.push(Client::Connected(socket))
-        } else {
-            eprintln!("Client send_text failed, dropping socket")
         }
     }
     *clients = notified_clients;
@@ -128,6 +127,23 @@ fn notify_clients(clients: &mut Vec<Client>, message: &Message) {
 /******************************************************************************
  * Webpage templates.
  */
+fn home_page(request: &Request) -> Response {
+    let server = request.header("Host").unwrap_or("<server>");
+    let template = html! {
+        : horrorshow::helper::doctype::HTML;
+        html {
+            head {
+                meta(name="viewport", content="width=device-width, initial-scale=1.0");
+                title : "Meowww";
+            }
+            body {
+                p : format!("Go to http://{}/<chat_room_name> to access a chat room.", server);
+            }
+        }
+    };
+    Response::html(template.into_string().unwrap())
+}
+
 fn room_page(room: &str, history: Option<&VecDeque<Message>>) -> Response {
     let template = html! {
         : horrorshow::helper::doctype::HTML;
@@ -172,30 +188,19 @@ fn post_message(request: &Request, room: &mut Room) -> Response {
         content: form_data.content,
     };
     room.add_message(message);
-    Response::text("Message sent, but please enable javascript")
+    Response::text("Message sent. Please enable javascript.")
 }
 
 fn create_notify_websocket(request: &Request, room: &mut Room) -> Response {
     use rouille::websocket;
     let (response, websocket_receiver) = try_or_400!(websocket::start(request, Some("meowww")));
+    /* rouille::websocket:
+     * start returns a response that must be sent before access to the websocket.
+     * The current strategy is to store the mpsc::Receiver.
+     * The socket is received later during a notification.
+     */
     room.add_client(websocket_receiver);
-    eprintln!("New websocket!");
     response
-}
-
-fn home_page() -> Response {
-    let template = html! {
-        : horrorshow::helper::doctype::HTML;
-        html {
-            head {
-                title : "Meowww";
-            }
-            body {
-                p : "Go to http://<server>/<chat_room_name> to access a chat room.";
-            }
-        }
-    };
-    Response::html(template.into_string().unwrap())
 }
 
 /* External files.
@@ -213,7 +218,7 @@ fn send_asset(path: &str) -> Response {
             path if path.ends_with(".js") => "application/javascript",
             _ => "application/octet-stream",
         };
-        Response::from_data(content_type, asset) // TODO Add .with_public_cache(3600)
+        Response::from_data(content_type, asset).with_public_cache(3600)
     } else {
         Response::empty_404()
     }
