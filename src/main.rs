@@ -262,7 +262,7 @@ fn home_page(request: &Request) -> Response {
     Response::html(template.into_string().unwrap())
 }
 
-fn room_page(room: &str, history: Option<&VecDeque<Message>>) -> Response {
+fn room_page(room_name: &str, history: Option<&VecDeque<Message>>) -> Response {
     let template = html! {
         : horrorshow::helper::doctype::HTML;
         html {
@@ -270,7 +270,8 @@ fn room_page(room: &str, history: Option<&VecDeque<Message>>) -> Response {
                 link(rel="icon", type="image/vnd.microsoft.icon", href="/static/meowww.ico");
                 link(rel="stylesheet", type="text/css", href="/static/style.css");
                 meta(name="viewport", content="width=device-width, initial-scale=1.0");
-                title : format!("Meowww - {}", room);
+                meta(name="room_name", content=room_name);
+                title : format!("Meowww - {}", room_name);
             }
             body {
                 main {

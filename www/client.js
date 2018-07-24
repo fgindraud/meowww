@@ -1,6 +1,26 @@
 /******************************************************************************
  * Content manipulation.
  */
+
+// Change title for message notifications
+var title = $('title');
+var room_name = $('meta[name=room_name]').attr('content');
+var title_has_notifications = false;
+
+function signal_new_message() {
+	if (!title_has_notifications && !document.hasFocus()) {
+		title.text("Meowww !! - " + room_name);
+		title_has_notifications = true;
+	}
+}
+$(document).focusin(function () {
+	if (title_has_notifications) {
+		title.text("Meowww - " + room_name);
+		title_has_notifications = false;
+	}
+});
+
+// Reset scrolling
 function get_scrollbar () {
 	if (document.scrollingElement) {
 		return document.scrollingElement;
@@ -15,19 +35,21 @@ function scroll_to_bottom () {
 	scrollbar.scrollTop = scrollbar.scrollHeight; // Force scroll to bottom
 }
 
+// Write messages to the table
 var messages = $('table');
-
 function write_message(message) {
 	messages.append($('<tr></tr>').append (
 		$('<td></td>').text(message.nickname),
 		$('<td></td>').text(message.content)));
 	scroll_to_bottom();
+	signal_new_message();
 }
 function error_message(text) {
 	messages.append($('<tr class="error"></tr>').append(
 		$('<td></td>').text("Error"),
 		$('<td></td>').text(text)));
 	scroll_to_bottom();
+	signal_new_message();
 }
 
 /******************************************************************************
@@ -57,7 +79,7 @@ notifier.onmessage = function (message) {
 var input_nickname = $('input[name="nickname"]');
 var input_content = $('input[name="content"]');
 
-function send_message() {
+$('form').submit (function (event) {
 	var message = {
 		nickname: input_nickname.val(),
 		content: input_content.val()
@@ -71,7 +93,5 @@ function send_message() {
 			error_message("Failed to send message. Server may be down.");
 		}
 	});
-	return false;
-}
-
-$('form').attr('onsubmit', 'return send_message()');
+	event.preventDefault();
+});
