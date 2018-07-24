@@ -192,9 +192,12 @@ impl Room {
     fn history(&self) -> &VecDeque<Message> {
         &self.history
     }
-    fn add_message(&mut self, message: Message) {
+    fn add_message(&mut self, mut message: Message) {
         // Do not propagate degenerate messages
         if !message.nickname.trim().is_empty() && !message.content.trim().is_empty() {
+            // Limit nickname size. Do not use truncate because of char boundary.
+            message.nickname = message.nickname.chars().take(30).collect();
+            // Add message to history and clients history
             notify_clients(&mut self.clients, &message);
             self.history.push_back(message);
             while self.history.len() > self.history_size {

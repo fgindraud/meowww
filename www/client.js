@@ -40,14 +40,14 @@ notifier.onerror = function (error) {
 	error_message("Notification connection error: " + error);
 };
 notifier.onclose = function (event) {
-	error_message("Notification connection closed unexpectedly");
+	error_message("Notification connection closed unexpectedly, try reloading the page.");
 };
 notifier.onmessage = function (message) {
 	try {
 		var json = JSON.parse(message.data);
 		write_message(json);
 	} catch (e) {
-		error_message("Invalid notification message");
+		error_message("Invalid notification message.");
 	}
 };
 
@@ -68,7 +68,7 @@ function send_message() {
 		type: "POST",
 		data: message,
 		error: function (xhr, status, error) {
-			error_message("Failed to send message");
+			error_message("Failed to send message. Server may be down.");
 		}
 	});
 	return false;

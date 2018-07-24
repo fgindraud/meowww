@@ -44,7 +44,6 @@ table {
  * Margin is arbitrary, sadly...
  */
 body {
-	overflow-x: hidden;
 	padding: 0;
 	margin: 0;
 }
