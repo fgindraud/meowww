@@ -122,47 +122,27 @@ impl Rooms {
     }
     /* Access a room in write mode and execute function.
      * If the room does not exist, create a new room.
-     * Room is deleted if not worth_keeping.
-     * TODO detect if room is not worth keeping during fast path
+     * All modify operation will fill it with something anyway.
      */
     fn modify<F, R>(&self, room_name: &str, f: F) -> R
     where
         F: Fn(&mut Room) -> R,
     {
-        let result_if_room_existed = match self.table.read().unwrap().get(room_name) {
-            Some(room) => {
-                // Fast path using only read lock: room already exists
-                Some(f(&mut room.lock().unwrap()))
+        if let Some(room) = self.table.read().unwrap().get(room_name) {
+            // Fast path using only read lock: room already exists
+            return f(&mut room.lock().unwrap());
+        }
+
+        use std::collections::hash_map::Entry;
+        match self.table.write().unwrap().entry(room_name.to_owned()) {
+            Entry::Occupied(mut entry) => {
+                // A new room has already been inserted by someone else in the meantime.
+                f(&mut entry.get_mut().lock().unwrap())
             }
-            None => None,
-        };
-        match result_if_room_existed {
-            Some(result) => result,
-            None => {
-                // Room does not exist, call f on temporary new room
+            Entry::Vacant(entry) => {
                 let mut room = Room::new(room_name, self.history_size);
                 let result = f(&mut room);
-                if room.worth_keeping() {
-                    // Insert room in table, with write lock.
-                    use std::collections::hash_map::Entry;
-                    match self.table.write().unwrap().entry(room_name.to_owned()) {
-                        Entry::Occupied(mut entry) => {
-                            // A new room has already been inserted by someone else: merge.
-                            // Check that the resulting room should be kept or not.
-                            let worth = {
-                                let mut lock = entry.get_mut().lock().unwrap();
-                                lock.merge(room);
-                                lock.worth_keeping()
-                            };
-                            if !worth {
-                                entry.remove_entry();
-                            }
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(Mutex::new(room));
-                        }
-                    }
-                }
+                entry.insert(Mutex::new(room));
                 result
             }
         }
@@ -205,11 +185,6 @@ impl Room {
             pending_clients: Vec::new(),
             connected_clients: Vec::new(),
         }
-    }
-    fn merge(&mut self, mut other: Room) {
-        self.history.append(&mut other.history);
-        self.pending_clients.append(&mut other.pending_clients);
-        self.connected_clients.append(&mut other.connected_clients);
     }
 
     fn name(&self) -> &str {
@@ -262,10 +237,6 @@ impl Room {
             .collect();
         self.connected_clients = non_failed_clients;
         debug!("[{}] notify Websocket = {}", self.name(), self.nb_clients());
-    }
-
-    fn worth_keeping(&self) -> bool {
-        !self.history.is_empty() || self.nb_clients() > 0
     }
 }
 
