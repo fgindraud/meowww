@@ -21,5 +21,4 @@ New messages are sent to the server using separate AJAX requests.
 
 ## TODO
 * Store nickname in Cookies ?
-* History size limit
 * Improve websocket handling

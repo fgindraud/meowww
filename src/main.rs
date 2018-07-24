@@ -26,12 +26,26 @@ fn main() {
                 .help("Address on which the server will bind")
                 .default_value("localhost:8000"),
         )
+        .arg(
+            clap::Arg::with_name("history_size")
+                .short("l")
+                .long("history-size")
+                .takes_value(true)
+                .value_name("size")
+                .default_value("1000")
+                .help("Maximum size of room history"),
+        )
         .get_matches();
 
-    start_server(matches.value_of("addr").unwrap())
+    let history_size = matches
+        .value_of("history_size")
+        .unwrap()
+        .parse()
+        .expect("history_size: usize");
+    start_server(matches.value_of("addr").unwrap(), history_size)
 }
 
-fn start_server(addr: &str) {
+fn start_server(addr: &str, history_size: usize) {
     eprintln!("Meowww starting on {}", addr);
     // use Mutex instead of Rwlock, because Room is not Sync (due to Client / Websocket).
     let rooms = Mutex::new(HashMap::<String, Room>::new());
@@ -45,11 +59,11 @@ fn start_server(addr: &str) {
             },
             (POST) ["/{room}", room: String] => {
                 let mut lock = rooms.lock().unwrap();
-                post_message(request, lock.entry(room).or_insert_with(|| Room::new()))
+                post_message(request, lock.entry(room).or_insert_with(|| Room::new(history_size)))
             },
             (GET) ["/{room}/notify", room: String] => {
                 let mut lock = rooms.lock().unwrap();
-                create_notify_websocket(request, lock.entry(room).or_insert_with(|| Room::new()))
+                create_notify_websocket(request, lock.entry(room).or_insert_with(|| Room::new(history_size)))
             },
             _ => { Response::empty_404() }
         )
@@ -66,13 +80,15 @@ struct Message {
 }
 
 struct Room {
+    history_size: usize,
     history: VecDeque<Message>,
     clients: Vec<Client>,
 }
 
 impl Room {
-    fn new() -> Self {
+    fn new(history_size: usize) -> Self {
         Room {
+            history_size: history_size,
             history: VecDeque::new(),
             clients: Vec::new(),
         }
@@ -82,6 +98,9 @@ impl Room {
         if !message.nickname.trim().is_empty() && !message.content.trim().is_empty() {
             notify_clients(&mut self.clients, &message);
             self.history.push_back(message);
+            while self.history.len() > self.history_size {
+                self.history.pop_front();
+            }
         }
     }
     fn history(&self) -> &VecDeque<Message> {
