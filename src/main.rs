@@ -35,6 +35,14 @@ fn main() {
                 .default_value("1000")
                 .help("Maximum size of room history"),
         )
+        .arg(
+            clap::Arg::with_name("nb_threads")
+                .short("n")
+                .long("nb-threads")
+                .takes_value(true)
+                .default_value("2")
+                .help("Size of the threadpool"),
+        )
         .get_matches();
 
     let history_size = matches
@@ -42,14 +50,19 @@ fn main() {
         .unwrap()
         .parse()
         .expect("history_size: usize");
-    start_server(matches.value_of("addr").unwrap(), history_size)
+    let nb_threads = matches
+        .value_of("nb_threads")
+        .unwrap()
+        .parse()
+        .expect("nb_threads: usize");
+    start_server(matches.value_of("addr").unwrap(), history_size, nb_threads)
 }
 
-fn start_server(addr: &str, history_size: usize) {
+fn start_server(addr: &str, history_size: usize, nb_threads: usize) {
     eprintln!("Meowww starting on {}", addr);
     // use Mutex instead of Rwlock, because Room is not Sync (due to Client / Websocket).
     let rooms = Mutex::new(HashMap::<String, Room>::new());
-    rouille::start_server(addr, move |request| {
+    rouille::start_server_with_pool(addr, Some(nb_threads), move |request| {
         router!(request,
             (GET) ["/"] => { home_page(request) },
             (GET) ["/static/{asset}", asset: String] => { send_asset(&asset) },
@@ -210,7 +223,7 @@ fn post_message(request: &Request, room: &mut Room) -> Response {
         content: form_data.content,
     };
     room.add_message(message);
-    Response::text("Message sent. Please enable javascript.")
+    Response::text("Message sent. Please enable javascript for a better interface.")
 }
 
 fn create_notify_websocket(request: &Request, room: &mut Room) -> Response {
