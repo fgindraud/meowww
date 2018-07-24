@@ -22,4 +22,5 @@ New messages are sent to the server using separate AJAX requests.
 ## TODO
 * Change icon in case of notification ?
 * Store nickname in Cookies ?
-* Improve websocket handling & cleanup
+* Improve websocket handling & cleanup, by using an asynchronous framework.
+* Prune unused chat rooms (timer).

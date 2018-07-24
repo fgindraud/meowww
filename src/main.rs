@@ -16,6 +16,14 @@ use rouille::{websocket::Websocket, Request, Response};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{mpsc, Mutex, RwLock};
 
+macro_rules! debug {
+    ($($arg:tt)*) => { 
+        if cfg!(debug_assertions) {
+            eprintln!($($arg)*);
+        }
+    };
+}
+
 /******************************************************************************
  * Start the server.
  */
@@ -132,7 +140,7 @@ impl Rooms {
             Some(result) => result,
             None => {
                 // Room does not exist, call f on temporary new room
-                let mut room = Room::new(self.history_size);
+                let mut room = Room::new(room_name, self.history_size);
                 let result = f(&mut room);
                 if room.worth_keeping() {
                     // Insert room in table, with write lock.
@@ -170,81 +178,95 @@ struct Message {
     content: String,
 }
 
+/* Room structure.
+ * Keep a fixed size history of messages.
+ *
+ * Maintain list of connected client websockets for new message notifications.
+ * Due to rouille websocket API (synchronous), we only use these sockets to push notifications.
+ * Pending clients are not yet completed WebSockets (see create_notify_websocket).
+ * Connected clients are complete WebSockets.
+ * The list of clients must be cleaned frequently to remove failed sockets.
+ * This cannot be done asynchronously due to the limited rouille API.
+ */
 struct Room {
+    name: String,
     history_size: usize,
     history: VecDeque<Message>,
-    clients: Vec<Client>,
+    pending_clients: Vec<mpsc::Receiver<Websocket>>,
+    connected_clients: Vec<Websocket>,
 }
 
 impl Room {
-    fn new(history_size: usize) -> Self {
+    fn new<S: Into<String>>(name: S, history_size: usize) -> Self {
         Room {
+            name: name.into(),
             history_size: history_size,
             history: VecDeque::new(),
-            clients: Vec::new(),
+            pending_clients: Vec::new(),
+            connected_clients: Vec::new(),
         }
     }
     fn merge(&mut self, mut other: Room) {
         self.history.append(&mut other.history);
-        self.clients.append(&mut other.clients);
+        self.pending_clients.append(&mut other.pending_clients);
+        self.connected_clients.append(&mut other.connected_clients);
     }
 
+    fn name(&self) -> &str {
+        &self.name
+    }
     fn history(&self) -> &VecDeque<Message> {
         &self.history
     }
+    fn nb_clients(&self) -> usize {
+        self.pending_clients.len() + self.connected_clients.len()
+    }
+
     fn add_message(&mut self, mut message: Message) {
         // Do not propagate degenerate messages
         if !message.nickname.trim().is_empty() && !message.content.trim().is_empty() {
             // Limit nickname size. Do not use truncate because of char boundary.
             message.nickname = message.nickname.chars().take(30).collect();
             // Add message to history and clients history
-            notify_clients(&mut self.clients, &message);
+            self.notify_clients(&message);
             self.history.push_back(message);
             while self.history.len() > self.history_size {
                 self.history.pop_front();
             }
         }
     }
-    fn add_client(&mut self, socket: mpsc::Receiver<Websocket>) {
-        self.clients.push(Client::Pending(socket))
+    fn add_client(&mut self, future_socket: mpsc::Receiver<Websocket>) {
+        self.pending_clients.push(future_socket);
+        debug!("[{}] add Websocket = {}", self.name(), self.nb_clients())
+    }
+
+    // Clean the client list.
+    fn connect_clients(&mut self) {
+        // Connect pending clients
+        self.connected_clients
+            .extend(self.pending_clients.drain(..).filter_map(|c| c.recv().ok()));
+        // Remove failed clients. NOTE Has no effect. is_closed only happens on reads.
+        self.connected_clients.retain(|c| !c.is_closed());
+        debug!("[{}] clean Websocket = {}", self.name(), self.nb_clients());
+    }
+
+    // Send a message to all clients, and drop failed clients.
+    fn notify_clients(&mut self, message: &Message) {
+        let json = serde_json::to_string(message).unwrap();
+        let non_failed_clients = self.connected_clients
+            .drain(..)
+            .filter_map(|mut socket| match socket.send_text(&json) {
+                Ok(_) => Some(socket),
+                Err(_) => None,
+            })
+            .collect();
+        self.connected_clients = non_failed_clients;
+        debug!("[{}] notify Websocket = {}", self.name(), self.nb_clients());
     }
 
     fn worth_keeping(&self) -> bool {
-        // TODO use for cleanup of rooms with timer ?
-        !self.history.is_empty() || !self.clients.is_empty()
+        !self.history.is_empty() || self.nb_clients() > 0
     }
-}
-
-/* Connection to client for notification.
- * Due to rouille websocket API (synchronous), we only use these sockets to push notifications.
- * They are only destroyed when trying to send data, during notifications.
- * TODO periodic cleanup ?
- */
-enum Client {
-    Pending(mpsc::Receiver<Websocket>),
-    Connected(Websocket),
-}
-
-/* Notification:
- * Send the message to each connected client.
- * Drop any client with an error.
- * If client was not connected yet (Pending), finish connection.
- */
-fn notify_clients(clients: &mut Vec<Client>, message: &Message) {
-    let json = serde_json::to_string(message).unwrap();
-
-    let mut notified_clients = Vec::new();
-    for client in clients.drain(..) {
-        let mut socket = match client {
-            Client::Pending(receiver) => receiver.recv().unwrap(),
-            Client::Connected(socket) => socket,
-        };
-        if let Ok(_) = socket.send_text(&json) {
-            // Drop if failed to send, keep on success
-            notified_clients.push(Client::Connected(socket))
-        }
-    }
-    *clients = notified_clients;
 }
 
 /******************************************************************************
@@ -313,6 +335,7 @@ fn post_message(request: &Request, room: &mut Room) -> Response {
         nickname: form_data.nickname,
         content: form_data.content,
     };
+    room.connect_clients();
     room.add_message(message);
     Response::text("Message sent. Please enable javascript for a better interface.")
 }
@@ -325,6 +348,7 @@ fn create_notify_websocket(request: &Request, room: &mut Room) -> Response {
      * The current strategy is to store the mpsc::Receiver.
      * The socket is received later during a notification.
      */
+    room.connect_clients();
     room.add_client(websocket_receiver);
     response
 }
