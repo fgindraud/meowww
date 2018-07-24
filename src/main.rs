@@ -14,7 +14,7 @@ extern crate serde_json;
 use horrorshow::Template;
 use rouille::{websocket::Websocket, Request, Response};
 use std::collections::{HashMap, VecDeque};
-use std::sync::{mpsc, Mutex};
+use std::sync::{mpsc, Mutex, RwLock};
 
 /******************************************************************************
  * Start the server.
@@ -60,31 +60,109 @@ fn main() {
 
 fn start_server(addr: &str, history_size: usize, nb_threads: usize) {
     eprintln!("Meowww starting on {}", addr);
-    // use Mutex instead of Rwlock, because Room is not Sync (due to Client / Websocket).
-    let rooms = Mutex::new(HashMap::<String, Room>::new());
+    let rooms = Rooms::new(history_size);
     rouille::start_server_with_pool(addr, Some(nb_threads), move |request| {
         router!(request,
             (GET) ["/"] => { home_page(request) },
             (GET) ["/static/{asset}", asset: String] => { send_asset(&asset) },
-            (GET) ["/{room}", room: String] => {
-                let lock = rooms.lock().unwrap();
-                room_page(&room, lock.get(&room).map(|r : &Room| r.history()))
+            (GET) ["/{room_name}", room_name: String] => {
+                rooms.access(&room_name, |opt_room| room_page(&room_name, opt_room.map(|r| r.history())))
             },
-            (POST) ["/{room}", room: String] => {
-                let mut lock = rooms.lock().unwrap();
-                post_message(request, lock.entry(room).or_insert_with(|| Room::new(history_size)))
+            (POST) ["/{room_name}", room_name: String] => {
+                rooms.modify(&room_name, |room| post_message(request, room))
             },
-            (GET) ["/{room}/notify", room: String] => {
-                let mut lock = rooms.lock().unwrap();
-                create_notify_websocket(request, lock.entry(room).or_insert_with(|| Room::new(history_size)))
+            (GET) ["/{room_name}/notify", room_name: String] => {
+                rooms.modify(&room_name, |room| create_notify_websocket(request, room))
             },
             _ => { Response::empty_404() }
         )
     })
 }
 
+/* Room set synchronisation:
+ * The set of rooms is infrequently modified, so the table itself is protected by a RwLock.
+ * Each Room is then protected by a mutex.
+ * RwLock cannot be used because inner Client Websockets are not Sync.
+ * And Rooms are often modified, so a RwLock is not as interesting.
+ * Lock acquisition order is always table_rwlock then room_mutex.
+ */
+struct Rooms {
+    table: RwLock<HashMap<String, Mutex<Room>>>,
+    history_size: usize,
+}
+
+impl Rooms {
+    fn new(history_size: usize) -> Self {
+        Rooms {
+            table: RwLock::new(HashMap::new()),
+            history_size: history_size,
+        }
+    }
+    // Access a room in readonly and execute function
+    fn access<F, R>(&self, room_name: &str, f: F) -> R
+    where
+        F: FnOnce(Option<&Room>) -> R,
+    {
+        let table_lock = self.table.read().unwrap();
+        match table_lock.get(room_name) {
+            Some(room) => {
+                let room_lock = room.lock().unwrap();
+                f(Some(&room_lock))
+            }
+            None => f(None),
+        }
+    }
+    /* Access a room in write mode and execute function.
+     * If the room does not exist, create a new room.
+     * Room is deleted if not worth_keeping.
+     * TODO detect if room is not worth keeping during fast path
+     */
+    fn modify<F, R>(&self, room_name: &str, f: F) -> R
+    where
+        F: Fn(&mut Room) -> R,
+    {
+        let result_if_room_existed = match self.table.read().unwrap().get(room_name) {
+            Some(room) => {
+                // Fast path using only read lock: room already exists
+                Some(f(&mut room.lock().unwrap()))
+            }
+            None => None,
+        };
+        match result_if_room_existed {
+            Some(result) => result,
+            None => {
+                // Room does not exist, call f on temporary new room
+                let mut room = Room::new(self.history_size);
+                let result = f(&mut room);
+                if room.worth_keeping() {
+                    // Insert room in table, with write lock.
+                    use std::collections::hash_map::Entry;
+                    match self.table.write().unwrap().entry(room_name.to_owned()) {
+                        Entry::Occupied(mut entry) => {
+                            // A new room has already been inserted by someone else: merge.
+                            // Check that the resulting room should be kept or not.
+                            let worth = {
+                                let mut lock = entry.get_mut().lock().unwrap();
+                                lock.merge(room);
+                                lock.worth_keeping()
+                            };
+                            if !worth {
+                                entry.remove_entry();
+                            }
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(Mutex::new(room));
+                        }
+                    }
+                }
+                result
+            }
+        }
+    }
+}
+
 /******************************************************************************
- * Start the server.
+ * Chat room management.
  */
 #[derive(Clone, Serialize, Deserialize)]
 struct Message {
@@ -106,6 +184,14 @@ impl Room {
             clients: Vec::new(),
         }
     }
+    fn merge(&mut self, mut other: Room) {
+        self.history.append(&mut other.history);
+        self.clients.append(&mut other.clients);
+    }
+
+    fn history(&self) -> &VecDeque<Message> {
+        &self.history
+    }
     fn add_message(&mut self, message: Message) {
         // Do not propagate degenerate messages
         if !message.nickname.trim().is_empty() && !message.content.trim().is_empty() {
@@ -116,11 +202,13 @@ impl Room {
             }
         }
     }
-    fn history(&self) -> &VecDeque<Message> {
-        &self.history
-    }
     fn add_client(&mut self, socket: mpsc::Receiver<Websocket>) {
         self.clients.push(Client::Pending(socket))
+    }
+
+    fn worth_keeping(&self) -> bool {
+        // TODO use for cleanup of rooms with timer ?
+        !self.history.is_empty() || !self.clients.is_empty()
     }
 }
 
