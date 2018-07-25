@@ -220,23 +220,29 @@ impl Room {
         // Connect pending clients
         self.connected_clients
             .extend(self.pending_clients.drain(..).filter_map(|c| c.recv().ok()));
-        // Remove failed clients. NOTE Has no effect. is_closed only happens on reads.
-        self.connected_clients.retain(|c| !c.is_closed());
-        debug!("[{}] clean Websocket = {}", self.name(), self.nb_clients());
+        // Send empty messages to test clients
+        self.broadcast_and_clean(&"");
+        debug!("[{}] clean Websocket = {}", self.name(), self.nb_clients())
     }
 
     // Send a message to all clients, and drop failed clients.
     fn notify_clients(&mut self, message: &Message) {
         let json = serde_json::to_string(message).unwrap();
+        self.broadcast_and_clean(&json);
+        debug!("[{}] send Websocket = {}", self.name(), self.nb_clients())
+    }
+
+    fn broadcast_and_clean(&mut self, text: &str) {
+        // Send the message to all clients, remove failed and closed ones.
         let non_failed_clients = self.connected_clients
             .drain(..)
-            .filter_map(|mut socket| match socket.send_text(&json) {
+            .filter_map(|mut socket| match socket.send_text(text) {
                 Ok(_) => Some(socket),
                 Err(_) => None,
             })
+            .filter(|socket| !socket.is_closed()) // NOTE no effect if no reads :/
             .collect();
         self.connected_clients = non_failed_clients;
-        debug!("[{}] notify Websocket = {}", self.name(), self.nb_clients());
     }
 }
 

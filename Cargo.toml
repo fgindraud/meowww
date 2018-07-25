@@ -1,6 +1,6 @@
 [package]
 name = "meowww"
-version = "1.1.0"
+version = "1.2.0"
 authors = ["François Gindraud <francois.gindraud@univ-lyon1.fr>"]
 description = "Simple stateless chat server with websockets"
 

@@ -66,8 +66,11 @@ notifier.onclose = function (event) {
 };
 notifier.onmessage = function (message) {
 	try {
-		var json = JSON.parse(message.data);
-		write_message(json);
+		// Ignore pings, which are empty string messages
+		if (message.data != "") {
+			var json = JSON.parse(message.data);
+			write_message(json);
+		}
 	} catch (e) {
 		error_message("Invalid notification message.");
 	}
