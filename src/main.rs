@@ -275,6 +275,7 @@ fn room_page(room_name: &str, history: Option<&VecDeque<Message>>) -> Response {
             head {
                 link(rel="icon", type="image/vnd.microsoft.icon", href="/static/meowww.ico");
                 link(rel="stylesheet", type="text/css", href="/static/style.css");
+                script(src="/static/jquery.js") {}
                 meta(name="viewport", content="width=device-width, initial-scale=1.0");
                 meta(name="room_name", content=room_name);
                 title : format!("Meowww - {}", room_name);
@@ -299,7 +300,6 @@ fn room_page(room_name: &str, history: Option<&VecDeque<Message>>) -> Response {
                         input(type="submit", value="Send");
                     }
                 }
-                script(src="/static/jquery.js") {}
                 script(src="/static/client.js") {}
             }
         }
