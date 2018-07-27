@@ -12,6 +12,7 @@ extern crate serde_derive;
 extern crate serde_json;
 
 use horrorshow::Template;
+use rouille::url::percent_encoding::{percent_decode, utf8_percent_encode, USERINFO_ENCODE_SET};
 use rouille::{websocket::Websocket, Request, Response};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{mpsc, Mutex, RwLock};
@@ -74,7 +75,7 @@ fn start_server(addr: &str, history_size: usize, nb_threads: usize) {
             (GET) ["/"] => { home_page(request) },
             (GET) ["/static/{asset}", asset: String] => { send_asset(&asset) },
             (GET) ["/{room_name}", room_name: String] => {
-                rooms.access(&room_name, |opt_room| room_page(&room_name, opt_room.map(|r| r.history())))
+                rooms.access(&room_name, |opt_room| room_page(request, &room_name, opt_room.map(|r| r.history())))
             },
             (POST) ["/{room_name}", room_name: String] => {
                 rooms.modify(&room_name, |room| post_message(request, room))
@@ -268,7 +269,10 @@ fn home_page(request: &Request) -> Response {
     Response::html(template.into_string().unwrap())
 }
 
-fn room_page(room_name: &str, history: Option<&VecDeque<Message>>) -> Response {
+fn room_page(request: &Request, room_name: &str, history: Option<&VecDeque<Message>>) -> Response {
+    let nickname = rouille::input::cookies(request)
+        .find(|&(n, _)| n == "nickname")
+        .map(|(_, v)| percent_decode(v.as_bytes()).decode_utf8_lossy().to_string());
     let template = html! {
         : horrorshow::helper::doctype::HTML;
         html {
@@ -295,7 +299,7 @@ fn room_page(room_name: &str, history: Option<&VecDeque<Message>>) -> Response {
                 }
                 footer {
                     form(autocomplete="off", method="post") {
-                        input(type="text", name="nickname", placeholder="Nickname");
+                        input(type="text", name="nickname", placeholder="Nickname", value?=nickname);
                         input(type="text", name="content", placeholder="Message content", autofocus);
                         input(type="submit", value="Send");
                     }
@@ -313,9 +317,15 @@ fn post_message(request: &Request, room: &mut Room) -> Response {
         nickname: form_data.nickname,
         content: form_data.content,
     };
+    let url_encoded_nickname: String =
+        utf8_percent_encode(&message.nickname, USERINFO_ENCODE_SET).collect();
     room.connect_clients();
     room.add_message(message);
     Response::text("Message sent. Please enable javascript for a better interface.")
+        .with_additional_header(
+            "Set-Cookie",
+            format!("nickname=\"{}\"", url_encoded_nickname),
+        )
 }
 
 fn create_notify_websocket(request: &Request, room: &mut Room) -> Response {
